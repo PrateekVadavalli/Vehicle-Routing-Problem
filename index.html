@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>School Bus Routing System</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <link rel="stylesheet" href="css/main.css">
+  <link rel="stylesheet" href="css/dashboard.css">
+</head>
+<body>
+  <div class="app-container">
+    <header class="app-header">
+      <div class="logo">
+        <i class="fas fa-bus"></i>
+        <h1>School Bus Routing</h1>
+      </div>
+    </header>
+
+    <div class="main-content">
+      <aside class="sidebar">
+        <div class="control-panel">
+          <h3><i class="fas fa-sliders-h"></i> Controls</h3>
+          <div class="form-group">
+            <label for="total-students">Total Students</label>
+            <input type="number" id="total-students" min="1" value="8">
+          </div>
+          <div class="form-group">
+            <label for="bus-count">Number of Buses</label>
+            <input type="number" id="bus-count" min="1" max="8" value="2">
+          </div>
+          
+          <button id="mark-points-btn" class="btn-primary">
+            <i class="fas fa-map-marker-alt"></i> Mark Points
+          </button>
+          <button id="erase-mode-btn" class="btn-secondary">
+            <i class="fas fa-eraser"></i> Toggle Erase Mode
+          </button>
+          
+          <div id="route-controls" class="route-controls">
+            <h3><i class="fas fa-route"></i> Route Settings</h3>
+            <button id="set-start-btn" class="btn-primary">
+              <i class="fas fa-school"></i> Set Start Point
+            </button>
+            <button id="set-end-btn" class="btn-primary">
+              <i class="fas fa-warehouse"></i> Set End Point
+            </button>
+            <div class="terminal-status">
+              <p id="start-status"><i class="fas fa-school"></i> <span>Not set</span></p>
+              <p id="end-status"><i class="fas fa-warehouse"></i> <span>Not set</span></p>
+            </div>
+            <button id="generate-routes-btn" class="btn-success">
+              <i class="fas fa-route"></i> Generate Routes
+            </button>
+          </div>
+        </div>
+        
+        <div class="student-list">
+          <h3><i class="fas fa-users"></i> Students</h3>
+          <div id="students-container" class="students-container"></div>
+        </div>
+      </aside>
+
+      <main class="map-container">
+        <div id="map"></div>
+        <div id="loading" class="loading-overlay">
+          <div class="loading-content">
+            <div class="spinner"></div>
+            <p>Generating optimal routes...</p>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <div id="student-form-modal" class="modal">
+      <div class="modal-content">
+        <h3><i class="fas fa-user-plus"></i> Add Student</h3>
+        <form id="student-form">
+          <div class="form-group">
+            <label for="student-name">Name*</label>
+            <input type="text" id="student-name" required>
+          </div>
+          <div class="form-group">
+            <label for="student-phone">Phone</label>
+            <input type="tel" id="student-phone">
+          </div>
+          <div class="form-group">
+            <label for="student-gender">Gender</label>
+            <select id="student-gender">
+              <option value="Male">Male</option>
+              <option value="Female">Female</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="student-address">Address Notes</label>
+            <textarea id="student-address" rows="2"></textarea>
+          </div>
+          <div class="form-actions">
+            <button type="button" id="cancel-student-btn" class="btn-secondary">Cancel</button>
+            <button type="submit" class="btn-primary">Save Student</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/ml-kmeans@4.0.0/dist/ml-kmeans.min.js"></script>
+  <script src="js/main.js"></script>
+  <script src="js/map.js"></script>
+  <script src="js/clustering.js"></script>
+  <script src="js/routing.js"></script>
+  <script src="js/ui.js"></script>
+</body>
+</html>

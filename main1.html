@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>School Bus Routing with Start/End Points</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+  <style>
+    #map { height: 90vh; width: 100%; }
+    #controls { 
+      padding: 10px; 
+      text-align: center; 
+      background: #f4f4f4; 
+      font-family: Arial;
+    }
+    button { 
+      margin: 5px; 
+      padding: 8px 16px; 
+      cursor: pointer;
+      background: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 4px;
+    }
+    .legend {
+      position: absolute; 
+      bottom: 20px; 
+      right: 20px;
+      background: rgba(255,255,255,0.9); 
+      padding: 10px; 
+      border-radius: 5px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.2); 
+      display:none;
+      z-index: 1000;
+      max-height: 70vh;
+      overflow-y: auto;
+    }
+    .legend-item { 
+      display:flex; 
+      align-items:center; 
+      margin:5px 0; 
+      font-size: 14px;
+    }
+    .legend-color { 
+      width:20px; 
+      height:20px; 
+      margin-right:8px;
+      border: 1px solid #333;
+      border-radius: 3px;
+    }
+    .student-marker {
+      font-size: 32px;
+      text-align: center;
+      text-shadow: 0 0 3px white;
+    }
+    .terminal-marker {
+      font-size: 40px;
+      text-shadow: 0 0 5px white;
+    }
+    #loading {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: white;
+      padding: 20px;
+      border-radius: 5px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.3);
+      z-index: 1001;
+      display: none;
+    }
+    input {
+      padding: 5px;
+      margin: 0 5px;
+      width: 60px;
+    }
+    #route-controls {
+      display: none;
+      margin-top: 10px;
+    }
+    #student-form {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: white;
+      padding: 20px;
+      border-radius: 5px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.3);
+      z-index: 1002;
+      display: none;
+    }
+    #student-form label {
+      display: block;
+      margin: 10px 0 5px;
+    }
+    #student-form input, #student-form select {
+      width: 200px;
+      padding: 8px;
+    }
+    #student-form button {
+      margin-top: 15px;
+    }
+    .student-popup {
+      font-family: Arial;
+      font-size: 14px;
+    }
+    .student-popup h3 {
+      margin: 0 0 5px 0;
+    }
+    .student-popup p {
+      margin: 5px 0;
+    }
+  </style>
+</head>
+<body>
+
+<div id="controls">
+  <label>Total Students: <input type="number" id="total-students" value="8" min="1"></label>
+  <label>Buses: <input type="number" id="bus-count" value="2" min="1" max="8"></label>
+  <button onclick="collectPoints()">Mark Points</button>
+  <button onclick="toggleEraseMode()">Toggle Erase Mode</button>
+  <p>Click on map to add student locations. Toggle erase mode to remove points.</p>
+  
+  <div id="route-controls">
+    <h3>Set Route Terminals</h3>
+    <button onclick="setStartPoint()">Set Start Point</button>
+    <button onclick="setEndPoint()">Set End Point</button>
+    <button onclick="generateRoutes()">Generate Routes</button>
+    <p id="terminal-status">Start: Not set | End: Not set</p>
+  </div>
+</div>
+
+<div id="map"></div>
+<div id="loading">Generating optimal routes... Please wait</div>
+<div id="legend" class="legend">
+  <h4>Bus Routes</h4><div id="legend-items"></div>
+</div>
+
+<div id="student-form">
+  <h3>Add Student Details</h3>
+  <label for="student-name">Name:</label>
+  <input type="text" id="student-name" required>
+  
+  <label for="student-phone">Phone:</label>
+  <input type="tel" id="student-phone">
+  
+  <label for="student-gender">Gender:</label>
+  <select id="student-gender">
+    <option value="Male">Male</option>
+    <option value="Female">Female</option>
+    <option value="Other">Other</option>
+  </select>
+  
+  <button onclick="saveStudentDetails()">Save</button>
+  <button onclick="cancelStudentDetails()">Cancel</button>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/ml-kmeans@4.0.0/dist/ml-kmeans.min.js"></script>
+<script>
+// Initialize map
+const map = L.map('map').setView([17.385, 78.486], 13);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { 
+  attribution: '© OpenStreetMap contributors' 
+}).addTo(map);
+
+// Configuration
+const busColors = ['#e41a1c', '#377eb8', '#4daf4a', '#984ea3', '#ff7f00', '#ffff33', '#a65628', '#f781bf'];
+const studentMarkers = [];
+const routeLayers = [];
+let eraseMode = false;
+let startPoint = null;
+let endPoint = null;
+let startMarker = null;
+let endMarker = null;
+let isSettingStart = false;
+let isSettingEnd = false;
+let pendingMarkerPosition = null;
+
+// Add student marker on click
+map.on('click', e => {
+  if (eraseMode) return;
+  
+  if (isSettingStart) {
+    setStartLocation(e.latlng);
+    return;
+  }
+  
+  if (isSettingEnd) {
+    setEndLocation(e.latlng);
+    return;
+  }
+  
+  // Store the clicked position and show the student details form
+  pendingMarkerPosition = e.latlng;
+  document.getElementById('student-form').style.display = 'block';
+});
+
+function toggleEraseMode() {
+  eraseMode = !eraseMode;
+  alert("Erase mode is now " + (eraseMode ? "ON" : "OFF"));
+}
+
+function saveStudentDetails() {
+  const name = document.getElementById('student-name').value.trim();
+  const phone = document.getElementById('student-phone').value.trim();
+  const gender = document.getElementById('student-gender').value;
+  
+  if (!name) {
+    alert("Please enter the student's name");
+    return;
+  }
+  
+  // Create marker with student details
+  const marker = L.marker(pendingMarkerPosition, {
+    icon: L.divIcon({
+      className: 'student-marker',
+      html: gender === 'Male' ? '👦' : gender === 'Female' ? '👧' : '🧑',
+      iconSize: [30, 30]
+    })
+  }).addTo(map);
+  
+  // Store student details in the marker
+  marker.studentDetails = {
+    name: name,
+    phone: phone,
+    gender: gender
+  };
+  
+  // Create popup content
+  const popupContent = `
+    <div class="student-popup">
+      <h3>${name}</h3>
+      <p><strong>Gender:</strong> ${gender}</p>
+      <p><strong>Phone:</strong> ${phone || 'Not provided'}</p>
+      <p><strong>Location:</strong><br>
+        Lat: ${pendingMarkerPosition.lat.toFixed(4)}<br>
+        Lng: ${pendingMarkerPosition.lng.toFixed(4)}
+      </p>
+    </div>
+  `;
+  
+  marker.bindPopup(popupContent);
+  
+  marker.on('click', () => {
+    if (eraseMode) {
+      map.removeLayer(marker);
+      const index = studentMarkers.indexOf(marker);
+      if (index > -1) studentMarkers.splice(index, 1);
+    } else {
+      marker.openPopup();
+    }
+  });
+  
+  studentMarkers.push(marker);
+  cancelStudentDetails();
+}
+
+function cancelStudentDetails() {
+  document.getElementById('student-form').style.display = 'none';
+  document.getElementById('student-name').value = '';
+  document.getElementById('student-phone').value = '';
+  document.getElementById('student-gender').value = 'Male';
+  pendingMarkerPosition = null;
+}
+
+function collectPoints() {
+  const totalStudents = parseInt(document.getElementById('total-students').value);
+  
+  if (isNaN(totalStudents) || totalStudents < 1) {
+    alert("Please enter a valid number of students (at least 1)");
+    return;
+  }
+
+  if (studentMarkers.length !== totalStudents) {
+    alert(`Please mark exactly ${totalStudents} student locations (currently ${studentMarkers.length})`);
+    return;
+  }
+
+  document.getElementById('route-controls').style.display = 'block';
+}
+
+function setStartPoint() {
+  isSettingStart = true;
+  isSettingEnd = false;
+  alert("Click on map to set START POINT for all buses");
+}
+
+function setEndPoint() {
+  isSettingStart = false;
+  isSettingEnd = true;
+  alert("Click on map to set END POINT for all buses");
+}
+
+function setStartLocation(latlng) {
+  if (startMarker) map.removeLayer(startMarker);
+  
+  startPoint = latlng;
+  startMarker = L.marker(latlng, {
+    icon: L.divIcon({
+      className: 'terminal-marker',
+      html: '🏫',
+      iconSize: [40, 40]
+    })
+  }).addTo(map).bindPopup("School/Start Point");
+  
+  isSettingStart = false;
+  updateTerminalStatus();
+}
+
+function setEndLocation(latlng) {
+  if (endMarker) map.removeLayer(endMarker);
+  
+  endPoint = latlng;
+  endMarker = L.marker(latlng, {
+    icon: L.divIcon({
+      className: 'terminal-marker',
+      html: '🚌',
+      iconSize: [40, 40]
+    })
+  }).addTo(map).bindPopup("Depot/End Point");
+  
+  isSettingEnd = false;
+  updateTerminalStatus();
+}
+
+function updateTerminalStatus() {
+  const startText = startPoint ? `Set at (${startPoint.lat.toFixed(4)}, ${startPoint.lng.toFixed(4)})` : "Not set";
+  const endText = endPoint ? `Set at (${endPoint.lat.toFixed(4)}, ${endPoint.lng.toFixed(4)})` : "Not set";
+  document.getElementById('terminal-status').innerHTML = `Start: ${startText} | End: ${endText}`;
+}
+
+async function generateRoutes() {
+  if (!startPoint || !endPoint) {
+    alert("Please set both start and end points first");
+    return;
+  }
+
+  const busCount = Math.min(parseInt(document.getElementById('bus-count').value), busColors.length);
+  
+  // Clear previous routes
+  clearPreviousRoutes();
+  
+  // Show loading indicator
+  document.getElementById('loading').style.display = 'block';
+  
+  try {
+    // Get all student coordinates
+    const points = studentMarkers.map(m => [m.getLatLng().lat, m.getLatLng().lng]);
+    
+    // Cluster students geographically
+    const clusters = await clusterStudents(points, busCount);
+    
+    // Generate routes for each cluster including terminals
+    await generateClusterRoutesWithTerminals(clusters);
+    
+  } catch (error) {
+    console.error("Route generation failed:", error);
+    alert("Failed to generate routes. Please try again with different points.");
+  } finally {
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('legend').style.display = 'block';
+  }
+}
+
+function clearPreviousRoutes() {
+  routeLayers.forEach(layer => map.removeLayer(layer));
+  routeLayers.length = 0;
+  document.getElementById('legend-items').innerHTML = '';
+  document.getElementById('legend').style.display = 'none';
+}
+
+async function clusterStudents(points, k) {
+  try {
+    // First try with k-means++ initialization
+    let result = mlKMeans(points, k, { 
+      initialization: 'kmeans++',
+      maxIterations: 200,
+      tolerance: 1e-4
+    });
+    
+    // Group points by cluster
+    const clusters = Array.from({length: k}, () => []);
+    result.clusters.forEach((clusterIdx, pointIdx) => {
+      clusters[clusterIdx].push(points[pointIdx]);
+    });
+    
+    return clusters;
+    
+  } catch (error) {
+    console.error("Clustering failed, using fallback grouping:", error);
+    // Fallback to simple geographic grouping
+    return simpleGeographicGrouping(points, k);
+  }
+}
+
+function simpleGeographicGrouping(points, k) {
+  // Sort points by latitude then longitude
+  const sortedPoints = [...points].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  
+  // Distribute points evenly while maintaining geographic proximity
+  const clusters = Array.from({length: k}, () => []);
+  sortedPoints.forEach((point, i) => {
+    clusters[i % k].push(point);
+  });
+  
+  return clusters;
+}
+
+async function generateClusterRoutesWithTerminals(clusters) {
+  let hasValidRoute = false;
+  
+  for (let i = 0; i < clusters.length; i++) {
+    if (clusters[i].length === 0) {
+      addLegendItem(i, 0);
+      continue;
+    }
+    
+    try {
+      // Prepare waypoints: start -> students -> end
+      const waypoints = [
+        [startPoint.lat, startPoint.lng],
+        ...clusters[i],
+        [endPoint.lat, endPoint.lng]
+      ];
+      
+      // Get road route
+      const routeCoords = await getRoadRoute(coordinatesToLonLat(waypoints));
+      
+      // Draw the route
+      const route = L.polyline(routeCoords, {
+        color: busColors[i],
+        weight: 5,
+        opacity: 0.8,
+        smoothFactor: 1
+      }).addTo(map);
+      
+      routeLayers.push(route);
+      addLegendItem(i, clusters[i].length);
+      hasValidRoute = true;
+      
+      // Fit map to first valid route
+      if (!hasValidRoute) {
+        map.fitBounds(route.getBounds());
+        hasValidRoute = true;
+      }
+      
+    } catch (error) {
+      console.error(`Failed to get road route for cluster ${i}:`, error);
+      
+      // Fallback to straight line
+      const fallbackRoute = L.polyline([
+        [startPoint.lat, startPoint.lng],
+        ...clusters[i],
+        [endPoint.lat, endPoint.lng]
+      ], {
+        color: busColors[i],
+        weight: 3,
+        opacity: 0.6,
+        dashArray: '5,5'
+      }).addTo(map);
+      
+      routeLayers.push(fallbackRoute);
+      addLegendItem(i, clusters[i].length);
+    }
+  }
+}
+
+function coordinatesToLonLat(coordinates) {
+  return coordinates.map(coord => [coord[1], coord[0]]);
+}
+
+async function getRoadRoute(coordinates) {
+  // Limit to 50 waypoints (OSRM limit)
+  const maxWaypoints = 50;
+  if (coordinates.length > maxWaypoints) {
+    coordinates = simplifyCoordinates(coordinates, maxWaypoints);
+  }
+  
+  const coordString = coordinates.map(coord => coord.join(',')).join(';');
+  const url = `https://router.project-osrm.org/route/v1/driving/${coordString}?overview=full&geometries=geojson`;
+  
+  const response = await fetch(url);
+  const data = await response.json();
+  
+  if (data.code !== 'Ok') {
+    throw new Error(data.message || 'Routing failed');
+  }
+  
+  // Convert back to Leaflet format [lat, lng]
+  return data.routes[0].geometry.coordinates.map(coord => [coord[1], coord[0]]);
+}
+
+function simplifyCoordinates(coordinates, maxPoints) {
+  // Simple simplification - take first, last, and evenly spaced middle points
+  const simplified = [coordinates[0]];
+  const step = Math.max(1, Math.floor((coordinates.length - 2) / (maxPoints - 2)));
+  
+  for (let i = 1; i < coordinates.length - 1; i += step) {
+    simplified.push(coordinates[i]);
+  }
+  
+  simplified.push(coordinates[coordinates.length - 1]);
+  return simplified;
+}
+
+function addLegendItem(index, studentCount) {
+  const item = document.createElement('div');
+  item.className = 'legend-item';
+  item.innerHTML = `
+    <span class="legend-color" style="background:${busColors[index]}"></span>
+    <span>Bus ${index+1}: ${studentCount} students</span>
+  `;
+  document.getElementById('legend-items').appendChild(item);
+}
+</script>
+</body>
+</html>
